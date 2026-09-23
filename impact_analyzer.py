@@ -90,10 +90,14 @@ class ScenarioCandidate:
     tags: list[str]
     matched_step: str
     matched_step_line: int
+    matched_step_source: str
     step_definition: str
     confidence: str
     reason: str
     trace_path: list[str]
+    risk_score: int = 0
+    risk_level: str = "unscored"
+    risk_factors: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -643,6 +647,7 @@ def scenarios_for_step_definitions(step_defs: list[StepDefinition], scenarios: l
                     tags=scenario.tags,
                     matched_step=step_text,
                     matched_step_line=step["line"],
+                    matched_step_source=step.get("source", "Scenario"),
                     step_definition=step_def.qualified_name,
                     confidence="high",
                     reason="Feature step matches step-definition annotation pattern.",
@@ -660,12 +665,75 @@ def dedupe_candidates(candidates: list[ScenarioCandidate]) -> list[ScenarioCandi
     seen = set()
     unique: list[ScenarioCandidate] = []
     for item in candidates:
-        key = (item.feature_path, item.scenario_line, item.matched_step_line, item.step_definition)
+        key = (item.feature_path, item.scenario_line, item.matched_step_line, item.step_definition, item.matched_step_source)
         if key in seen:
             continue
         seen.add(key)
         unique.append(item)
     return unique
+
+
+def risk_level(score: int) -> str:
+    if score >= 70:
+        return "high"
+    if score >= 40:
+        return "medium"
+    return "low"
+
+
+def score_scenario_candidates(candidates: list[ScenarioCandidate], symbols: list[SymbolInfo]) -> list[ScenarioCandidate]:
+    changed_symbol_count = len(symbols)
+    changed_class_count = len({symbol.class_name for symbol in symbols if symbol.class_name})
+    changed_line_count = sum(len(symbol.changed_lines) for symbol in symbols)
+    changed_method_count = len({symbol.qualified_name for symbol in symbols if symbol.symbol_type in {"method", "function"}})
+
+    grouped: dict[tuple[str, int], list[ScenarioCandidate]] = {}
+    for candidate in candidates:
+        grouped.setdefault((candidate.feature_path, candidate.scenario_line), []).append(candidate)
+
+    for group in grouped.values():
+        impacted_steps = sorted({item.step_definition for item in group})
+        matched_sources = sorted({item.matched_step_source for item in group})
+        direct_hits = sum(1 for item in group if item.confidence == "high" and item.reason.startswith("Changed method"))
+        indirect_hits = sum(1 for item in group if item.confidence == "medium")
+        background_hits = sum(1 for item in group if item.matched_step_source == "Background")
+
+        score = 10
+        score += min(50, 20 * len(impacted_steps))
+        if direct_hits:
+            score += 10
+        if indirect_hits:
+            score += 15
+        if background_hits:
+            score += 10
+        score += min(10, 5 * changed_method_count)
+        score += min(10, 5 * changed_class_count)
+        score += min(10, changed_line_count)
+        score = min(100, score)
+
+        factors = {
+            "impacted_step_definition_count": len(impacted_steps),
+            "impacted_step_definitions": impacted_steps,
+            "direct_step_definition_hits": direct_hits,
+            "indirect_method_or_class_hits": indirect_hits,
+            "background_step_hits": background_hits,
+            "matched_step_sources": matched_sources,
+            "changed_symbol_count": changed_symbol_count,
+            "changed_method_or_function_count": changed_method_count,
+            "changed_class_count": changed_class_count,
+            "changed_line_count": changed_line_count,
+            "scoring_model": (
+                "Base 10 + impacted step definitions + direct/indirect trace strength + "
+                "Background usage + changed method/class/line footprint, capped at 100."
+            ),
+        }
+
+        for item in group:
+            item.risk_score = score
+            item.risk_level = risk_level(score)
+            item.risk_factors = factors
+
+    return candidates
 
 
 def direct_step_definition_candidates(
@@ -797,6 +865,7 @@ def build_trace_input(
         direct_step_definition_candidates(changed_symbols, step_defs, scenario_map)
         + simple_call_candidates(changed_symbols, step_defs, scenario_map, repo)
     )
+    candidates = score_scenario_candidates(candidates, changed_symbols)
     impacted_step_defs = impacted_step_definitions_from_candidates(step_defs, candidates, changed_symbols)
     unresolved = [
         {
