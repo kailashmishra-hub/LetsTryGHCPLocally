@@ -34,7 +34,8 @@ public class UpdateBookingStepdefinition {
 				.when().post(context.session.get("endpoint").toString());
 		String token = context.response.path("token");
 		LOG.info("Auth Token: "+token);
-		context.session.put("token", "token="+token);	
+		context.session.put("token", "token="+token);
+		System.out.println("Auth Token: "+token);
 	}
 
 	@When("user updates the details of a booking")

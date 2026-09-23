@@ -10,6 +10,7 @@ from typing import Iterable
 
 
 SOURCE_SUFFIXES = {".java", ".kt", ".groovy", ".scala", ".py", ".js", ".ts", ".tsx"}
+DEFAULT_IMPACT_ROOTS = ("src/main/java/", "src/test/java/")
 IGNORED_PARTS = {".git", ".idea", ".venv", "__pycache__", "node_modules", "target", "build", "dist"}
 STEP_ANNOTATIONS = {"Given", "When", "Then", "And", "But"}
 
@@ -177,9 +178,16 @@ def language_for(path: str) -> str:
     }.get(suffix, "unknown")
 
 
-def should_ignore(path: str) -> bool:
+def should_ignore(path: str, include_all_source: bool = False) -> bool:
     p = Path(path)
-    return p.suffix.lower() not in SOURCE_SUFFIXES or any(part in IGNORED_PARTS for part in p.parts)
+    normalized = path.replace("\\", "/")
+    if p.suffix.lower() not in SOURCE_SUFFIXES:
+        return True
+    if any(part in IGNORED_PARTS for part in p.parts):
+        return True
+    if include_all_source:
+        return False
+    return not normalized.startswith(DEFAULT_IMPACT_ROOTS)
 
 
 def read_ref_file(repo: Path, ref: str, path: str) -> str:
@@ -742,14 +750,14 @@ def impacted_step_definitions_from_candidates(
     return result
 
 
-def discover_changes(repo: Path, base_ref: str, target_ref: str) -> tuple[list[ChangedFile], str, str]:
+def discover_changes(repo: Path, base_ref: str, target_ref: str, include_all_source: bool = False) -> tuple[list[ChangedFile], str, str]:
     merge_base = run_git(repo, "merge-base", base_ref, target_ref).strip()
     target_sha = run_git(repo, "rev-parse", target_ref).strip()
     diff_output = run_git(repo, "diff", "--name-status", "--find-renames", merge_base, target_ref)
     changed_files: list[ChangedFile] = []
 
     for status, old_path, path in parse_name_status(diff_output):
-        if should_ignore(path):
+        if should_ignore(path, include_all_source=include_all_source):
             continue
         diff = run_git(repo, "diff", "--unified=3", merge_base, target_ref, "--", path, check=False)
         ranges = split_changed_ranges(diff)
@@ -771,10 +779,16 @@ def discover_changes(repo: Path, base_ref: str, target_ref: str) -> tuple[list[C
     return changed_files, merge_base, target_sha
 
 
-def build_trace_input(repo_path: Path, base_ref: str | None, target_ref: str, include_index: bool = False) -> TraceInput:
+def build_trace_input(
+    repo_path: Path,
+    base_ref: str | None,
+    target_ref: str,
+    include_index: bool = False,
+    include_all_source: bool = False,
+) -> TraceInput:
     repo = validate_repo(repo_path)
     base = base_ref or default_base(repo)
-    changed_files, base_sha, target_sha = discover_changes(repo, base, target_ref)
+    changed_files, base_sha, target_sha = discover_changes(repo, base, target_ref, include_all_source=include_all_source)
     step_defs = extract_step_definitions(repo)
     scenarios = parse_feature_files(repo)
     scenario_map = scenarios_for_step_definitions(step_defs, scenarios)
@@ -839,9 +853,20 @@ def main() -> int:
     parser.add_argument("--target", default="HEAD", help="Target ref to compare. Defaults to HEAD.")
     parser.add_argument("--output", default="runtime/trace-agent-input.json", help="Output JSON path.")
     parser.add_argument("--include-index", action="store_true", help="Include full step-definition and scenario indexes for debugging.")
+    parser.add_argument(
+        "--include-all-source",
+        action="store_true",
+        help="Analyze all supported source files, not only class files under src/main/java and src/test/java.",
+    )
     args = parser.parse_args()
 
-    trace_input = build_trace_input(Path(args.repo), args.base, args.target, include_index=args.include_index)
+    trace_input = build_trace_input(
+        Path(args.repo),
+        args.base,
+        args.target,
+        include_index=args.include_index,
+        include_all_source=args.include_all_source,
+    )
     write_json(trace_input, Path(args.output))
     print(f"Wrote {args.output}")
     print(f"Changed files: {len(trace_input.changed_files)}")
@@ -850,6 +875,7 @@ def main() -> int:
     print(f"Scenario candidates: {len(trace_input.scenario_candidates)}")
     print(f"Unresolved symbols: {len(trace_input.unresolved_symbols)}")
     print(f"Full repository index included: {args.include_index}")
+    print(f"Analyzed all source files: {args.include_all_source}")
     return 0
 
 

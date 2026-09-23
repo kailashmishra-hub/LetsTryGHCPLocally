@@ -1,11 +1,6 @@
 @bookerAPI @deleteBooking
 Feature: To delete a booking in restful-booker
 
-  Background: create an auth token
-    Given user has access to endpoint "/auth"
-    When user creates a auth token with credential "admin" & "password123"
-    Then user should get the response code 200
-
   @deleteBookingIDs
   Scenario: To delete a booking
     Given user has access to endpoint "/booking"
