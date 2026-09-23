@@ -544,6 +544,8 @@ def parse_feature_files(repo: Path) -> list[Scenario]:
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         feature_name: str | None = None
         pending_tags: list[str] = []
+        background_steps: list[dict] = []
+        in_background = False
         current: Scenario | None = None
 
         for line_no, line in enumerate(lines, 1):
@@ -554,8 +556,13 @@ def parse_feature_files(repo: Path) -> list[Scenario]:
             if stripped.lower().startswith("feature:"):
                 feature_name = stripped.split(":", 1)[1].strip()
                 continue
+            if stripped.lower().startswith("background:"):
+                in_background = True
+                current = None
+                continue
             scenario_match = re.match(r"^(Scenario(?: Outline)?):\s*(.+)$", stripped, flags=re.IGNORECASE)
             if scenario_match:
+                in_background = False
                 current = Scenario(
                     feature_path=rel,
                     feature_name=feature_name,
@@ -563,18 +570,29 @@ def parse_feature_files(repo: Path) -> list[Scenario]:
                     scenario_type=scenario_match.group(1),
                     line=line_no,
                     tags=pending_tags,
-                    steps=[],
+                    steps=[dict(step) for step in background_steps],
                 )
                 scenarios.append(current)
                 pending_tags = []
                 continue
             step_match = step_re.match(line)
+            if step_match and in_background:
+                background_steps.append(
+                    {
+                        "keyword": step_match.group(1),
+                        "text": step_match.group(2).strip(),
+                        "line": line_no,
+                        "source": "Background",
+                    }
+                )
+                continue
             if step_match and current:
                 current.steps.append(
                     {
                         "keyword": step_match.group(1),
                         "text": step_match.group(2).strip(),
                         "line": line_no,
+                        "source": "Scenario",
                     }
                 )
     return scenarios
@@ -588,11 +606,11 @@ def cucumber_pattern_to_regex(pattern: str) -> re.Pattern | None:
         except re.error:
             return None
     escaped = re.escape(raw)
-    escaped = escaped.replace(r"\{string\}", r'"[^"]*"|\'[^\']*\'|.+')
+    escaped = escaped.replace(r"\{string\}", r"(?:\"[^\"]*\"|'[^']*')")
     escaped = escaped.replace(r"\{int\}", r"-?\d+")
     escaped = escaped.replace(r"\{float\}", r"-?\d+(?:\.\d+)?")
     escaped = escaped.replace(r"\{word\}", r"\w+")
-    escaped = re.sub(r"\\\{[^}]+\\\}", r".+", escaped)
+    escaped = re.sub(r"\\\{[^}]+\\\}", r"(?:.+?)", escaped)
     try:
         return re.compile(f"^{escaped}$", flags=re.IGNORECASE)
     except re.error:
