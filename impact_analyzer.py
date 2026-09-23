@@ -101,6 +101,21 @@ class ScenarioCandidate:
 
 
 @dataclass
+class ScenarioImpact:
+    feature_path: str
+    feature_name: str | None
+    scenario_name: str
+    scenario_line: int
+    tags: list[str]
+    impacted_steps: list[dict]
+    impacted_step_definition_count: int
+    risk_score: int
+    risk_level: str
+    risk_factors: dict
+    trace_paths: list[list[str]]
+
+
+@dataclass
 class TraceInput:
     schema_version: str
     repo: str
@@ -110,7 +125,7 @@ class TraceInput:
     target_sha: str
     changed_files: list[ChangedFile]
     impacted_step_definitions: list[StepDefinition]
-    scenario_candidates: list[ScenarioCandidate]
+    scenario_impacts: list[ScenarioImpact]
     unresolved_symbols: list[dict]
     repository_index_summary: dict
     repository_index: dict | None = None
@@ -736,6 +751,66 @@ def score_scenario_candidates(candidates: list[ScenarioCandidate], symbols: list
     return candidates
 
 
+def aggregate_scenario_impacts(candidates: list[ScenarioCandidate]) -> list[ScenarioImpact]:
+    grouped: dict[tuple[str, int], list[ScenarioCandidate]] = {}
+    for candidate in candidates:
+        grouped.setdefault((candidate.feature_path, candidate.scenario_line), []).append(candidate)
+
+    impacts: list[ScenarioImpact] = []
+    for group in grouped.values():
+        first = group[0]
+        impacted_steps = []
+        seen_steps = set()
+        for item in sorted(group, key=lambda candidate: (candidate.matched_step_line, candidate.step_definition)):
+            key = (item.matched_step_line, item.step_definition, item.matched_step)
+            if key in seen_steps:
+                continue
+            seen_steps.add(key)
+            impacted_steps.append(
+                {
+                    "matched_step": item.matched_step,
+                    "matched_step_line": item.matched_step_line,
+                    "matched_step_source": item.matched_step_source,
+                    "step_definition": item.step_definition,
+                    "confidence": item.confidence,
+                    "reason": item.reason,
+                }
+            )
+
+        trace_paths = []
+        seen_trace_paths = set()
+        for item in group:
+            key = tuple(item.trace_path)
+            if key in seen_trace_paths:
+                continue
+            seen_trace_paths.add(key)
+            trace_paths.append(item.trace_path)
+
+        risk_factors = dict(first.risk_factors)
+        risk_factors["impacted_step_count"] = len(impacted_steps)
+
+        impacts.append(
+            ScenarioImpact(
+                feature_path=first.feature_path,
+                feature_name=first.feature_name,
+                scenario_name=first.scenario_name,
+                scenario_line=first.scenario_line,
+                tags=first.tags,
+                impacted_steps=impacted_steps,
+                impacted_step_definition_count=risk_factors.get("impacted_step_definition_count", 0),
+                risk_score=first.risk_score,
+                risk_level=first.risk_level,
+                risk_factors=risk_factors,
+                trace_paths=trace_paths,
+            )
+        )
+
+    return sorted(
+        impacts,
+        key=lambda impact: (-impact.risk_score, impact.feature_path, impact.scenario_line, impact.scenario_name),
+    )
+
+
 def direct_step_definition_candidates(
     symbols: list[SymbolInfo],
     step_defs: list[StepDefinition],
@@ -866,6 +941,7 @@ def build_trace_input(
         + simple_call_candidates(changed_symbols, step_defs, scenario_map, repo)
     )
     candidates = score_scenario_candidates(candidates, changed_symbols)
+    scenario_impacts = aggregate_scenario_impacts(candidates)
     impacted_step_defs = impacted_step_definitions_from_candidates(step_defs, candidates, changed_symbols)
     unresolved = [
         {
@@ -892,7 +968,7 @@ def build_trace_input(
         target_sha=target_sha,
         changed_files=changed_files,
         impacted_step_definitions=impacted_step_defs,
-        scenario_candidates=candidates,
+        scenario_impacts=scenario_impacts,
         unresolved_symbols=unresolved,
         repository_index_summary={
             "total_step_definitions_indexed": len(step_defs),
@@ -941,7 +1017,7 @@ def main() -> int:
     print(f"Changed files: {len(trace_input.changed_files)}")
     print(f"Changed symbols: {sum(len(item.changed_symbols) for item in trace_input.changed_files)}")
     print(f"Impacted step definitions: {len(trace_input.impacted_step_definitions)}")
-    print(f"Scenario candidates: {len(trace_input.scenario_candidates)}")
+    print(f"Impacted scenarios: {len(trace_input.scenario_impacts)}")
     print(f"Unresolved symbols: {len(trace_input.unresolved_symbols)}")
     print(f"Full repository index included: {args.include_index}")
     print(f"Analyzed all source files: {args.include_all_source}")
