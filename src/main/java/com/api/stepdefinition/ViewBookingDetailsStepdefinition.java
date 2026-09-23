@@ -57,6 +57,7 @@ public class ViewBookingDetailsStepdefinition {
 		assertNotNull("Booking Details not found!!", bookingDetails);
 		context.session.put("firstname", bookingDetails.getFirstname());
 		context.session.put("lastname", bookingDetails.getLastname());
+		System.out.println("Booking Details: "+bookingDetails.toString());
 	}
 
 	@Given("user makes a request to view booking IDs from {string} to {string}")
