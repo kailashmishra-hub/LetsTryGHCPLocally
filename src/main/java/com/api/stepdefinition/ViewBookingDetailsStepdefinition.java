@@ -44,7 +44,8 @@ public class ViewBookingDetailsStepdefinition {
 	@Then("user should see all the booking IDs")
 	public void userShouldSeeAllTheBookingIDS() {		
 		BookingID[] bookingIDs = ResponseHandler.deserializedResponse(context.response, BookingID[].class);
-		assertNotNull("Booking ID not found!!", bookingIDs);		
+		assertNotNull("Booking ID not found!!", bookingIDs);
+		System.out.println("Booking IDs: "+bookingIDs.length);
 	}
 
 	@Then("user makes a request to view details of a booking ID")
