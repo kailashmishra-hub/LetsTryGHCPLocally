@@ -104,10 +104,11 @@ class TraceInput:
     target_ref: str
     target_sha: str
     changed_files: list[ChangedFile]
-    step_definitions: list[StepDefinition]
-    scenarios: list[Scenario]
+    impacted_step_definitions: list[StepDefinition]
     scenario_candidates: list[ScenarioCandidate]
     unresolved_symbols: list[dict]
+    repository_index_summary: dict
+    repository_index: dict | None = None
 
 
 def run_git(repo: Path, *args: str, check: bool = True) -> str:
@@ -625,12 +626,66 @@ def scenarios_for_step_definitions(step_defs: list[StepDefinition], scenarios: l
     return result
 
 
+def clone_candidate(candidate: ScenarioCandidate) -> ScenarioCandidate:
+    return ScenarioCandidate(**asdict(candidate))
+
+
+def dedupe_candidates(candidates: list[ScenarioCandidate]) -> list[ScenarioCandidate]:
+    seen = set()
+    unique: list[ScenarioCandidate] = []
+    for item in candidates:
+        key = (item.feature_path, item.scenario_line, item.matched_step_line, item.step_definition)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+    return unique
+
+
+def direct_step_definition_candidates(
+    symbols: list[SymbolInfo],
+    step_defs: list[StepDefinition],
+    scenario_map: dict[str, list[ScenarioCandidate]],
+) -> list[ScenarioCandidate]:
+    candidates: list[ScenarioCandidate] = []
+    step_defs_by_qname = {step_def.qualified_name: step_def for step_def in step_defs}
+
+    for symbol in symbols:
+        step_def = step_defs_by_qname.get(symbol.qualified_name)
+        if step_def is None:
+            step_def = next(
+                (
+                    item for item in step_defs
+                    if item.file_path == symbol.file_path and item.method_name == symbol.name
+                ),
+                None,
+            )
+        if step_def is None:
+            continue
+
+        for item in scenario_map.get(step_def.qualified_name, []):
+            copied = clone_candidate(item)
+            copied.confidence = "high"
+            copied.reason = "Changed method is the Cucumber step definition used by this scenario."
+            copied.trace_path = [
+                symbol.qualified_name,
+                step_def.qualified_name,
+                f"{item.feature_path}:{item.scenario_line}",
+            ]
+            candidates.append(copied)
+
+    return candidates
+
+
 def simple_call_candidates(symbols: list[SymbolInfo], step_defs: list[StepDefinition], scenario_map: dict[str, list[ScenarioCandidate]], repo: Path) -> list[ScenarioCandidate]:
     candidates: list[ScenarioCandidate] = []
     changed_method_names = {symbol.name for symbol in symbols}
     changed_class_names = {symbol.class_name for symbol in symbols if symbol.class_name}
+    changed_qnames = {symbol.qualified_name for symbol in symbols}
 
     for step_def in step_defs:
+        if step_def.qualified_name in changed_qnames:
+            continue
         content = (repo / step_def.file_path).read_text(encoding="utf-8", errors="replace")
         body = content
         if step_def.method_start_line and step_def.method_end_line:
@@ -641,12 +696,32 @@ def simple_call_candidates(symbols: list[SymbolInfo], step_defs: list[StepDefini
         if not method_hit and not class_hit:
             continue
         for item in scenario_map.get(step_def.qualified_name, []):
-            copied = ScenarioCandidate(**asdict(item))
+            copied = clone_candidate(item)
             copied.confidence = "medium"
             copied.reason = "Step-definition body references a changed method or class name."
-            copied.trace_path = sorted(changed_method_names) + [step_def.qualified_name, f"{item.feature_path}:{item.scenario_line}"]
+            copied.trace_path = sorted(changed_qnames) + [step_def.qualified_name, f"{item.feature_path}:{item.scenario_line}"]
             candidates.append(copied)
     return candidates
+
+
+def impacted_step_definitions_from_candidates(
+    step_defs: list[StepDefinition],
+    candidates: list[ScenarioCandidate],
+    symbols: list[SymbolInfo],
+) -> list[StepDefinition]:
+    impacted_qnames = {item.step_definition for item in candidates}
+    changed_qnames = {symbol.qualified_name for symbol in symbols}
+    changed_methods = {(symbol.file_path, symbol.name) for symbol in symbols}
+
+    result = []
+    for step_def in step_defs:
+        if (
+            step_def.qualified_name in impacted_qnames
+            or step_def.qualified_name in changed_qnames
+            or (step_def.file_path, step_def.method_name) in changed_methods
+        ):
+            result.append(step_def)
+    return result
 
 
 def discover_changes(repo: Path, base_ref: str, target_ref: str) -> tuple[list[ChangedFile], str, str]:
@@ -678,7 +753,7 @@ def discover_changes(repo: Path, base_ref: str, target_ref: str) -> tuple[list[C
     return changed_files, merge_base, target_sha
 
 
-def build_trace_input(repo_path: Path, base_ref: str | None, target_ref: str) -> TraceInput:
+def build_trace_input(repo_path: Path, base_ref: str | None, target_ref: str, include_index: bool = False) -> TraceInput:
     repo = validate_repo(repo_path)
     base = base_ref or default_base(repo)
     changed_files, base_sha, target_sha = discover_changes(repo, base, target_ref)
@@ -686,7 +761,11 @@ def build_trace_input(repo_path: Path, base_ref: str | None, target_ref: str) ->
     scenarios = parse_feature_files(repo)
     scenario_map = scenarios_for_step_definitions(step_defs, scenarios)
     changed_symbols = [symbol for file in changed_files for symbol in file.changed_symbols]
-    candidates = simple_call_candidates(changed_symbols, step_defs, scenario_map, repo)
+    candidates = dedupe_candidates(
+        direct_step_definition_candidates(changed_symbols, step_defs, scenario_map)
+        + simple_call_candidates(changed_symbols, step_defs, scenario_map, repo)
+    )
+    impacted_step_defs = impacted_step_definitions_from_candidates(step_defs, candidates, changed_symbols)
     unresolved = [
         {
             "qualifiedName": symbol.qualified_name,
@@ -696,6 +775,12 @@ def build_trace_input(repo_path: Path, base_ref: str | None, target_ref: str) ->
         for symbol in changed_symbols
         if not any(symbol.name in " ".join(item.trace_path) for item in candidates)
     ]
+    repository_index = None
+    if include_index:
+        repository_index = {
+            "step_definitions": step_defs,
+            "scenarios": scenarios,
+        }
 
     return TraceInput(
         schema_version="trace-agent-input/v2",
@@ -705,16 +790,28 @@ def build_trace_input(repo_path: Path, base_ref: str | None, target_ref: str) ->
         target_ref=target_ref,
         target_sha=target_sha,
         changed_files=changed_files,
-        step_definitions=step_defs,
-        scenarios=scenarios,
+        impacted_step_definitions=impacted_step_defs,
         scenario_candidates=candidates,
         unresolved_symbols=unresolved,
+        repository_index_summary={
+            "total_step_definitions_indexed": len(step_defs),
+            "total_scenarios_indexed": len(scenarios),
+            "full_index_included": include_index,
+        },
+        repository_index=repository_index,
     )
 
 
 def write_json(data: TraceInput, output: Path) -> None:
+    def prune_none(value):
+        if isinstance(value, dict):
+            return {key: prune_none(item) for key, item in value.items() if item is not None}
+        if isinstance(value, list):
+            return [prune_none(item) for item in value]
+        return value
+
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(asdict(data), indent=2), encoding="utf-8")
+    output.write_text(json.dumps(prune_none(asdict(data)), indent=2), encoding="utf-8")
 
 
 def main() -> int:
@@ -723,15 +820,18 @@ def main() -> int:
     parser.add_argument("--base", default=None, help="Base ref. Defaults to origin HEAD/master/main/develop.")
     parser.add_argument("--target", default="HEAD", help="Target ref to compare. Defaults to HEAD.")
     parser.add_argument("--output", default="runtime/trace-agent-input.json", help="Output JSON path.")
+    parser.add_argument("--include-index", action="store_true", help="Include full step-definition and scenario indexes for debugging.")
     args = parser.parse_args()
 
-    trace_input = build_trace_input(Path(args.repo), args.base, args.target)
+    trace_input = build_trace_input(Path(args.repo), args.base, args.target, include_index=args.include_index)
     write_json(trace_input, Path(args.output))
     print(f"Wrote {args.output}")
     print(f"Changed files: {len(trace_input.changed_files)}")
     print(f"Changed symbols: {sum(len(item.changed_symbols) for item in trace_input.changed_files)}")
+    print(f"Impacted step definitions: {len(trace_input.impacted_step_definitions)}")
     print(f"Scenario candidates: {len(trace_input.scenario_candidates)}")
     print(f"Unresolved symbols: {len(trace_input.unresolved_symbols)}")
+    print(f"Full repository index included: {args.include_index}")
     return 0
 
 
