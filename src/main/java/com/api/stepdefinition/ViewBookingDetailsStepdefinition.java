@@ -31,6 +31,7 @@ public class ViewBookingDetailsStepdefinition {
 		context.response = context.requestSetup().when().get(context.session.get("endpoint").toString());
 		int bookingID = context.response.getBody().jsonPath().getInt("[0].bookingid");
 		LOG.info("Booking ID: "+bookingID);
+		System.out.println("Booking ID: "+bookingID);
 		assertNotNull("Booking ID not found!", bookingID);
 		context.session.put("bookingID", bookingID);
 	}
