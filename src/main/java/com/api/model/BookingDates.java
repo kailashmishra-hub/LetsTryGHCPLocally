@@ -7,7 +7,9 @@ public class BookingDates {
 
     public String getCheckin ()
     {
+        System.out.println("Getting check-in date");
         return checkin;
+
     }
 
     public void setCheckin (String checkin)
