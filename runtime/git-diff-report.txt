@@ -1,0 +1,29 @@
+Git diff: origin/main..HEAD
+Scope: src/main/java, src/test/java
+
+Files changed: 3
+
+1. src/main/java/com/api/model/BookingDetailsDTO.java
+   Type: modified
+   Class: BookingDetailsDTO
+   Impacted members:
+   - bookingdates field (access modifier changed)
+   Summary: Changed bookingdates field access modifier from private to public.
+
+2. src/main/java/com/api/stepdefinition/ViewBookingDetailsStepdefinition.java
+   Type: modified
+   Class: ViewBookingDetailsStepdefinition
+   Impacted members:
+   - userShouldSeeAllTheBookingIDS() method
+   - userMakesARequestToViewDetailsOfABookingID() method
+   Step definitions changed:
+   - @Then("user should see all the booking IDs") -> userShouldSeeAllTheBookingIDS()
+   - @Then("user makes a request to view details of a booking ID") -> userMakesARequestToViewDetailsOfABookingID()
+   Summary: Added System.out.println debug statements in two test step methods.
+
+3. src/main/java/com/api/utils/TestContext.java
+   Type: modified
+   Class: TestContext
+   Impacted members:
+   - requestSetup() method
+   Summary: Added System.out.println debug statement to log Base URL at method start.
