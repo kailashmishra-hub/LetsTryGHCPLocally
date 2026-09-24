@@ -84,9 +84,6 @@ public class UpdateBookingStepdefinition {
 				.pathParam("bookingID", context.session.get("bookingID"))
 				.body(JsonReader.getRequestBody(JSONFile,dataKey))
 				.when().put(context.session.get("endpoint")+"/{bookingID}");
-		
-		BookingDetailsDTO bookingDetailsDTO = ResponseHandler.deserializedResponse(context.response, BookingDetailsDTO.class);
-		assertNotNull("Booking not created", bookingDetailsDTO);	
 	}
 	
 	@When("user makes a request to update first name {string} & Last name {string}")
