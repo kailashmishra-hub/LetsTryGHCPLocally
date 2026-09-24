@@ -123,9 +123,9 @@ class TraceInput:
     base_sha: str
     target_ref: str
     target_sha: str
-    changed_files: list[ChangedFile]
-    impacted_step_definitions: list[StepDefinition]
-    scenario_impacts: list[ScenarioImpact]
+    changed_class_files: list[dict]
+    impacted_step_definitions: list[dict]
+    direct_scenario_impacts: list[dict]
     unresolved_symbols: list[dict]
     repository_index_summary: dict
     repository_index: dict | None = None
@@ -922,6 +922,147 @@ def discover_changes(repo: Path, base_ref: str, target_ref: str, include_all_sou
     return changed_files, merge_base, target_sha
 
 
+def range_to_trace_dict(item: ChangedRange) -> dict:
+    return {
+        "change_kind": item.change_kind,
+        "old_start": item.old_start,
+        "old_end": item.old_end,
+        "new_start": item.new_start,
+        "new_end": item.new_end,
+        "removed_lines": item.removed_lines,
+        "added_lines": item.added_lines,
+    }
+
+
+def changed_class_files_for_trace(changed_files: list[ChangedFile]) -> list[dict]:
+    result = []
+    for changed_file in changed_files:
+        changed_methods = []
+        for symbol in changed_file.changed_symbols:
+            changed_methods.append(
+                {
+                    "method_name": symbol.name,
+                    "qualified_name": symbol.qualified_name,
+                    "start_line": symbol.start_line,
+                    "end_line": symbol.end_line,
+                    "changed_lines": symbol.changed_lines,
+                    "changed_ranges": [range_to_trace_dict(item) for item in symbol.changed_ranges],
+                    "annotations": symbol.annotations,
+                    "snippet": symbol.snippet,
+                }
+            )
+        class_level_changes = [range_to_trace_dict(item) for item in changed_file.unmapped_changes]
+        if not changed_methods and not class_level_changes:
+            continue
+        first_symbol = changed_file.changed_symbols[0] if changed_file.changed_symbols else None
+        result.append(
+            {
+                "path": changed_file.path,
+                "class_name": first_symbol.class_name if first_symbol else Path(changed_file.path).stem,
+                "package_name": first_symbol.package_name if first_symbol else None,
+                "language": changed_file.language,
+                "status": changed_file.status,
+                "changed_methods": changed_methods,
+                "class_level_changes": class_level_changes,
+            }
+        )
+    return result
+
+
+def direct_step_definitions_for_symbols(step_defs: list[StepDefinition], symbols: list[SymbolInfo]) -> list[StepDefinition]:
+    result: list[StepDefinition] = []
+    seen = set()
+    for symbol in symbols:
+        step_def = next(
+            (
+                item for item in step_defs
+                if item.qualified_name == symbol.qualified_name
+                or (item.file_path == symbol.file_path and item.method_name == symbol.name)
+            ),
+            None,
+        )
+        if step_def is None or step_def.qualified_name in seen:
+            continue
+        seen.add(step_def.qualified_name)
+        result.append(step_def)
+    return result
+
+
+def step_definition_to_trace_dict(step_def: StepDefinition) -> dict:
+    return {
+        "file_path": step_def.file_path,
+        "class_name": step_def.class_name,
+        "method_name": step_def.method_name,
+        "qualified_name": step_def.qualified_name,
+        "annotation_type": step_def.annotation_type,
+        "pattern": step_def.pattern,
+        "line": step_def.line,
+        "method_start_line": step_def.method_start_line,
+        "method_end_line": step_def.method_end_line,
+    }
+
+
+def direct_scenario_impacts_for_trace(candidates: list[ScenarioCandidate]) -> list[dict]:
+    grouped: dict[tuple[str, int], list[ScenarioCandidate]] = {}
+    for candidate in candidates:
+        grouped.setdefault((candidate.feature_path, candidate.scenario_line), []).append(candidate)
+
+    impacts = []
+    for group in grouped.values():
+        first = group[0]
+        impacted_steps = []
+        by_step_def: dict[str, list[ScenarioCandidate]] = {}
+        for item in group:
+            by_step_def.setdefault(item.step_definition, []).append(item)
+
+        for step_definition, items in sorted(by_step_def.items()):
+            items = sorted(items, key=lambda item: item.matched_step_line)
+            impacted_steps.append(
+                {
+                    "matched_step": items[0].matched_step,
+                    "matched_step_lines": sorted({item.matched_step_line for item in items}),
+                    "matched_step_source": items[0].matched_step_source,
+                    "step_definition": step_definition,
+                    "confidence": items[0].confidence,
+                    "reason": items[0].reason,
+                }
+            )
+
+        impacts.append(
+            {
+                "feature_path": first.feature_path,
+                "feature_name": first.feature_name,
+                "scenario_name": first.scenario_name,
+                "scenario_line": first.scenario_line,
+                "tags": first.tags,
+                "impacted_steps": impacted_steps,
+            }
+        )
+
+    return sorted(impacts, key=lambda item: (item["feature_path"], item["scenario_line"], item["scenario_name"]))
+
+
+def unresolved_symbols_for_trace(symbols: list[SymbolInfo], impacted_step_defs: list[StepDefinition]) -> list[dict]:
+    impacted_qnames = {item.qualified_name for item in impacted_step_defs}
+    unresolved = []
+    for symbol in symbols:
+        if symbol.qualified_name in impacted_qnames:
+            continue
+        unresolved.append(
+            {
+                "qualified_name": symbol.qualified_name,
+                "file_path": symbol.file_path,
+                "class_name": symbol.class_name,
+                "method_name": symbol.name,
+                "changed_lines": symbol.changed_lines,
+                "changed_ranges": [range_to_trace_dict(item) for item in symbol.changed_ranges],
+                "snippet": symbol.snippet,
+                "reason": "Changed method is not a direct Cucumber step definition. Tracer Agent should inspect reverse call chains.",
+            }
+        )
+    return unresolved
+
+
 def build_trace_input(
     repo_path: Path,
     base_ref: str | None,
@@ -936,27 +1077,17 @@ def build_trace_input(
     scenarios = parse_feature_files(repo)
     scenario_map = scenarios_for_step_definitions(step_defs, scenarios)
     changed_symbols = [symbol for file in changed_files for symbol in file.changed_symbols]
-    candidates = dedupe_candidates(
-        direct_step_definition_candidates(changed_symbols, step_defs, scenario_map)
-        + simple_call_candidates(changed_symbols, step_defs, scenario_map, repo)
-    )
-    candidates = score_scenario_candidates(candidates, changed_symbols)
-    scenario_impacts = aggregate_scenario_impacts(candidates)
-    impacted_step_defs = impacted_step_definitions_from_candidates(step_defs, candidates, changed_symbols)
-    unresolved = [
-        {
-            "qualifiedName": symbol.qualified_name,
-            "filePath": symbol.file_path,
-            "reason": "No direct step-definition reference was found in the indexed slice.",
-        }
-        for symbol in changed_symbols
-        if not any(symbol.name in " ".join(item.trace_path) for item in candidates)
-    ]
+    candidates = dedupe_candidates(direct_step_definition_candidates(changed_symbols, step_defs, scenario_map))
+    impacted_step_defs = direct_step_definitions_for_symbols(step_defs, changed_symbols)
+    changed_class_files = changed_class_files_for_trace(changed_files)
+    impacted_step_definition_facts = [step_definition_to_trace_dict(item) for item in impacted_step_defs]
+    direct_scenario_impacts = direct_scenario_impacts_for_trace(candidates)
+    unresolved = unresolved_symbols_for_trace(changed_symbols, impacted_step_defs)
     repository_index = None
     if include_index:
         repository_index = {
-            "step_definitions": step_defs,
-            "scenarios": scenarios,
+            "step_definitions": [step_definition_to_trace_dict(item) for item in step_defs],
+            "scenarios": [asdict(item) for item in scenarios],
         }
 
     return TraceInput(
@@ -966,14 +1097,15 @@ def build_trace_input(
         base_sha=base_sha,
         target_ref=target_ref,
         target_sha=target_sha,
-        changed_files=changed_files,
-        impacted_step_definitions=impacted_step_defs,
-        scenario_impacts=scenario_impacts,
+        changed_class_files=changed_class_files,
+        impacted_step_definitions=impacted_step_definition_facts,
+        direct_scenario_impacts=direct_scenario_impacts,
         unresolved_symbols=unresolved,
         repository_index_summary={
             "total_step_definitions_indexed": len(step_defs),
             "total_scenarios_indexed": len(scenarios),
             "full_index_included": include_index,
+            "default_scope": "Direct Cucumber step-definition impacts only. Unresolved methods are left for the Tracer Agent.",
         },
         repository_index=repository_index,
     )
@@ -1013,14 +1145,38 @@ def main() -> int:
         include_all_source=args.include_all_source,
     )
     write_json(trace_input, Path(args.output))
-    print(f"Wrote {args.output}")
-    print(f"Changed files: {len(trace_input.changed_files)}")
-    print(f"Changed symbols: {sum(len(item.changed_symbols) for item in trace_input.changed_files)}")
-    print(f"Impacted step definitions: {len(trace_input.impacted_step_definitions)}")
-    print(f"Impacted scenarios: {len(trace_input.scenario_impacts)}")
-    print(f"Unresolved symbols: {len(trace_input.unresolved_symbols)}")
-    print(f"Full repository index included: {args.include_index}")
-    print(f"Analyzed all source files: {args.include_all_source}")
+    print(f"Trace input written: {args.output}")
+    print()
+    print(f"Class files impacted: {len(trace_input.changed_class_files)}")
+    for changed_file in trace_input.changed_class_files:
+        class_label = changed_file.get("class_name") or Path(changed_file["path"]).stem
+        print(f"- {changed_file['path']} ({class_label})")
+        for method in changed_file.get("changed_methods", []):
+            changed_lines = ", ".join(str(line) for line in method.get("changed_lines", [])) or "n/a"
+            print(f"  - {method['method_name']} [lines: {changed_lines}]")
+        for change in changed_file.get("class_level_changes", []):
+            if change.get("new_start") is not None and change.get("new_end") is not None:
+                if change["new_start"] == change["new_end"]:
+                    line_label = str(change["new_start"])
+                else:
+                    line_label = f"{change['new_start']}-{change['new_end']}"
+            elif change.get("old_start") is not None and change.get("old_end") is not None:
+                if change["old_start"] == change["old_end"]:
+                    line_label = str(change["old_start"])
+                else:
+                    line_label = f"{change['old_start']}-{change['old_end']}"
+            else:
+                line_label = "n/a"
+            print(f"  - class-level change [lines: {line_label}]")
+
+    print()
+    print(f"Step definitions impacted: {len(trace_input.impacted_step_definitions)}")
+    for step_def in trace_input.impacted_step_definitions:
+        print(
+            f"- @{step_def['annotation_type']}(\"{step_def['pattern']}\") "
+            f"-> {step_def['qualified_name']}"
+        )
+
     return 0
 
 
