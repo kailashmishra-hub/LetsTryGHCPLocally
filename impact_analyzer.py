@@ -951,17 +951,19 @@ def changed_class_files_for_trace(changed_files: list[ChangedFile]) -> list[dict
                     "snippet": symbol.snippet,
                 }
             )
-        if not changed_methods:
+        class_level_changes = [range_to_trace_dict(item) for item in changed_file.unmapped_changes]
+        if not changed_methods and not class_level_changes:
             continue
-        first_symbol = changed_file.changed_symbols[0]
+        first_symbol = changed_file.changed_symbols[0] if changed_file.changed_symbols else None
         result.append(
             {
                 "path": changed_file.path,
-                "class_name": first_symbol.class_name,
-                "package_name": first_symbol.package_name,
+                "class_name": first_symbol.class_name if first_symbol else Path(changed_file.path).stem,
+                "package_name": first_symbol.package_name if first_symbol else None,
                 "language": changed_file.language,
                 "status": changed_file.status,
                 "changed_methods": changed_methods,
+                "class_level_changes": class_level_changes,
             }
         )
     return result
@@ -1152,6 +1154,20 @@ def main() -> int:
         for method in changed_file.get("changed_methods", []):
             changed_lines = ", ".join(str(line) for line in method.get("changed_lines", [])) or "n/a"
             print(f"  - {method['method_name']} [lines: {changed_lines}]")
+        for change in changed_file.get("class_level_changes", []):
+            if change.get("new_start") is not None and change.get("new_end") is not None:
+                if change["new_start"] == change["new_end"]:
+                    line_label = str(change["new_start"])
+                else:
+                    line_label = f"{change['new_start']}-{change['new_end']}"
+            elif change.get("old_start") is not None and change.get("old_end") is not None:
+                if change["old_start"] == change["old_end"]:
+                    line_label = str(change["old_start"])
+                else:
+                    line_label = f"{change['old_start']}-{change['old_end']}"
+            else:
+                line_label = "n/a"
+            print(f"  - class-level change [lines: {line_label}]")
 
     print()
     print(f"Step definitions impacted: {len(trace_input.impacted_step_definitions)}")
