@@ -133,6 +133,12 @@ If the file does not exist, create it before responding.
 - Do not include full diffs unless explicitly requested.
 - Prefer concise summaries over long pasted patches.
 
+## Mandatory File Write
+
+Before responding, you must create or overwrite:
+
+`runtime/git-diff-report.txt`
+
 ## Final Response
 
 After creating `runtime/git-diff-report.txt`, respond with only:
