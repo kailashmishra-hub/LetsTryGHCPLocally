@@ -53,6 +53,7 @@ public class CreateBookingStepdefinition {
 
 	private void validateBookingData(JSONObject bookingData, BookingDTO bookingDTO) {
 		LOG.info(bookingData);
+		System.out.println("Printing....");
 		assertNotNull("Booking ID missing", bookingDTO.getBookingid());
 		assertEquals("First Name did not match", bookingData.get("firstname"), bookingDTO.getBooking().getFirstname());
 		assertEquals("Last Name did not match", bookingData.get("lastname"), bookingDTO.getBooking().getLastname());

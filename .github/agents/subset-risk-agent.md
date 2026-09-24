@@ -239,6 +239,12 @@ Before writing the final file:
 4. Copy unresolved step definitions from the input file to `unresolved_step_definitions`.
 5. Ensure JSON is valid.
 
+## Mandatory File Write
+
+Before responding, you must create or overwrite:
+
+`runtime/regression-subset.json`
+
 ## Final Response
 
 After writing `runtime/regression-subset.json`, respond only with:

@@ -123,6 +123,12 @@ Use this structure:
 - Preserve scenario tags from the feature file.
 - Preserve feature/scenario line numbers where possible.
 
+## Mandatory File Write
+
+Before responding, you must create or overwrite:
+
+`runtime/impacts-facts.json`
+
 ## Final Response
 
 After writing `runtime/impacts-facts.json`, respond with only:

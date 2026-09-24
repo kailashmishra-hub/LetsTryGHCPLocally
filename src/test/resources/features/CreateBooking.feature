@@ -4,6 +4,7 @@ Feature: To create a new booking in restful-booker
   @createBookingDataTable
   Scenario Outline: To create new booking using cucumber Data Table
     Given user has access to endpoint "/booking"
+    Given user creates a auth token with credential "admin" & "password123"
     When user creates a booking
       | firstname   | lastname   | totalprice   | depositpaid   | checkin   | checkout   | additionalneeds   |
       | <firstname> | <lastname> | <totalprice> | <depositpaid> | <checkin> | <checkout> | <additionalneeds> |
