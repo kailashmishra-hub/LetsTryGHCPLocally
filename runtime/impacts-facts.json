@@ -1,0 +1,134 @@
+﻿{
+  "schema_version": "trace-impact-agent/v2",
+  "unresolved_step_definitions": [
+  ],
+  "impacted_scenarios": [
+    {
+      "feature_name": "To view the restful-booker booking details",
+      "impacted_steps": [
+        {
+          "matched_step": "user should see all the booking IDs",
+          "matched_step_lines": [
+            9
+          ],
+          "matched_step_source": "Scenario",
+          "step_definition": "com.api.stepdefinition.ViewBookingDetailsStepdefinition#userShouldSeeAllTheBookingIDS",
+          "reason": "Scenario contains a feature step matching a changed step definition.",
+          "annotation": "@Then(\"user should see all the booking IDs\")"
+        }
+      ],
+      "tags": [
+        "@bookerAPI",
+        "@viewBooking",
+        "@viewAllBookingIDs"
+      ],
+      "scenario_line": 5,
+      "scenario_name": "To view all the booking IDs",
+      "feature_path": "src/test/resources/features/ViewBookingDetails.feature"
+    },
+    {
+      "feature_name": "To view the restful-booker booking details",
+      "impacted_steps": [
+        {
+          "matched_step": "user makes a request to view details of a booking ID",
+          "matched_step_lines": [
+            15
+          ],
+          "matched_step_source": "Scenario",
+          "step_definition": "com.api.stepdefinition.ViewBookingDetailsStepdefinition#userMakesARequestToViewDetailsOfBookingID",
+          "reason": "Scenario contains a feature step matching a changed step definition.",
+          "annotation": "@Then(\"user makes a request to view details of a booking ID\")"
+        }
+      ],
+      "tags": [
+        "@bookerAPI",
+        "@viewBooking",
+        "@viewBookingDetails"
+      ],
+      "scenario_line": 12,
+      "scenario_name": "To view booking details",
+      "feature_path": "src/test/resources/features/ViewBookingDetails.feature"
+    },
+    {
+      "feature_name": "To view the restful-booker booking details",
+      "impacted_steps": [
+        {
+          "matched_step": "user should see all the booking IDs",
+          "matched_step_lines": [
+            24
+          ],
+          "matched_step_source": "Scenario Outline",
+          "step_definition": "com.api.stepdefinition.ViewBookingDetailsStepdefinition#userShouldSeeAllTheBookingIDS",
+          "reason": "Scenario contains a feature step matching a changed step definition.",
+          "annotation": "@Then(\"user should see all the booking IDs\")"
+        }
+      ],
+      "tags": [
+        "@bookerAPI",
+        "@viewBooking",
+        "@viewByBookingDates"
+      ],
+      "scenario_line": 20,
+      "scenario_name": "To view all the booking IDs by booking dates",
+      "feature_path": "src/test/resources/features/ViewBookingDetails.feature"
+    },
+    {
+      "feature_name": "To view the restful-booker booking details",
+      "impacted_steps": [
+        {
+          "matched_step": "user should see all the booking IDs",
+          "matched_step_lines": [
+            35,
+            39
+          ],
+          "matched_step_source": "Scenario",
+          "step_definition": "com.api.stepdefinition.ViewBookingDetailsStepdefinition#userShouldSeeAllTheBookingIDS",
+          "reason": "Scenario contains a feature step matching a changed step definition.",
+          "annotation": "@Then(\"user should see all the booking IDs\")"
+        },
+        {
+          "matched_step": "user makes a request to view details of a booking ID",
+          "matched_step_lines": [
+            36
+          ],
+          "matched_step_source": "Scenario",
+          "step_definition": "com.api.stepdefinition.ViewBookingDetailsStepdefinition#userMakesARequestToViewDetailsOfBookingID",
+          "reason": "Scenario contains a feature step matching a changed step definition.",
+          "annotation": "@Then(\"user makes a request to view details of a booking ID\")"
+        }
+      ],
+      "tags": [
+        "@bookerAPI",
+        "@viewBooking",
+        "@viewBookingByName"
+      ],
+      "scenario_line": 32,
+      "scenario_name": "To view all the booking IDs by booking names",
+      "feature_path": "src/test/resources/features/ViewBookingDetails.feature"
+    },
+    {
+      "feature_name": "To delete a booking in restful-booker",
+      "impacted_steps": [
+        {
+          "matched_step": "user makes a request to view details of a booking ID",
+          "matched_step_lines": [
+            24
+          ],
+          "matched_step_source": "Scenario Outline",
+          "step_definition": "com.api.stepdefinition.ViewBookingDetailsStepdefinition#userMakesARequestToViewDetailsOfBookingID",
+          "reason": "Scenario contains a feature step matching a changed step definition.",
+          "annotation": "@Then(\"user makes a request to view details of a booking ID\")"
+        }
+      ],
+      "tags": [
+        "@bookerAPI",
+        "@deleteBooking",
+        "@e2eTest"
+      ],
+      "scenario_line": 12,
+      "scenario_name": "To perform a CURD operation on restful-booker",
+      "feature_path": "src/test/resources/features/DeleteBooking.feature"
+    }
+  ],
+  "source_file": "runtime/git-diff-report.txt"
+}

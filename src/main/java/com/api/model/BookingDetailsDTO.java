@@ -6,7 +6,7 @@ public class BookingDetailsDTO
 
     private String additionalneeds;
 
-    private BookingDates bookingdates;
+    public BookingDates bookingdates;
 
     private String totalprice;
 

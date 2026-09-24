@@ -44,7 +44,8 @@ public class ViewBookingDetailsStepdefinition {
 	@Then("user should see all the booking IDs")
 	public void userShouldSeeAllTheBookingIDS() {		
 		BookingID[] bookingIDs = ResponseHandler.deserializedResponse(context.response, BookingID[].class);
-		assertNotNull("Booking ID not found!!", bookingIDs);		
+		assertNotNull("Booking ID not found!!", bookingIDs);
+		System.out.println("Booking IDs: "+bookingIDs.length);
 	}
 
 	@Then("user makes a request to view details of a booking ID")
@@ -56,6 +57,7 @@ public class ViewBookingDetailsStepdefinition {
 		assertNotNull("Booking Details not found!!", bookingDetails);
 		context.session.put("firstname", bookingDetails.getFirstname());
 		context.session.put("lastname", bookingDetails.getLastname());
+		System.out.println("Booking Details: "+bookingDetails.toString());
 	}
 
 	@Given("user makes a request to view booking IDs from {string} to {string}")
